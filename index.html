@@ -1,0 +1,484 @@
+<!doctype html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Jeux Vidéo dans un site WEB - V 2.1</title>
+    <script src="//cdn.jsdelivr.net/npm/phaser@3.11.0/dist/phaser.js"></script>
+    <style type="text/css">
+        body {
+            margin: 0;
+        }
+    </style>
+</head>
+<body>
+
+<script type="text/javascript">
+
+// ============================================================================
+// ÉTAT DU JEU
+// ============================================================================
+
+let player;
+let stars;
+let bombs;
+let platforms;
+let cursors;
+let score = 0;
+let gameOver = false;
+let scoreText;
+let time = 0;
+let timeText;
+let timer;
+let gameoverText;
+let gameOverTextAdded = false;
+let restartButton;
+let bestScore = 0;
+let bestBombs = 0;
+let bestTime = 0;
+let totalSessionTime = 0;
+let statsOpen = false;
+let statsPaused = false;
+let lives = 3;
+let livesText;
+let bombsText;
+
+// ============================================================================
+// CONFIGURATION PHASER
+// ============================================================================
+
+const config = {
+    type: Phaser.AUTO,
+    width: 1920,
+    height: 1080,
+    physics: {
+        default: 'arcade',
+        arcade: {
+            gravity: { y: 300 },
+            debug: false
+        }
+    },
+    scene: {
+        preload: preload,
+        create: create,
+        update: update
+    }
+};
+
+const game = new Phaser.Game(config);
+
+// ============================================================================
+// FONCTIONS PHASER
+// ============================================================================
+
+/**
+ * Précharge les assets du jeu
+ */
+function preload() {
+    this.load.image('sky', 'assets/a016b213b04f6cb5f12e12f1dc9bf536.jpg');
+    this.load.image('ground', 'assets/1920-x-1080-background-presentation-260nw-1363013549.jpg');
+    this.load.image('star', 'assets/star.png');
+    this.load.image('bomb', 'assets/bomb.png');
+    this.load.spritesheet('dude', 'assets/dude.png', { frameWidth: 32, frameHeight: 48 });
+}
+
+/**
+ * Crée les éléments du jeu
+ */
+function create() {
+    // Ajouter l'image de fond
+    this.add.image(960, 540, 'sky');
+
+    // Créer les plateformes
+    platforms = this.physics.add.staticGroup();
+
+    // Plateforme principale (sol)
+    platforms.create(960, 1100, 'ground').setScale(4.2).refreshBody();
+
+    // Autres plateformes
+    platforms.create(1500, 900, 'ground');
+    platforms.create(200, 250, 'ground');
+    platforms.create(350, 650, 'ground');
+    platforms.create(1450, 250, 'ground');
+    platforms.create(950, 450, 'ground');
+    platforms.create(750, 800, 'ground');
+
+    // Créer le joueur
+    player = this.physics.add.sprite(960, 800, 'dude');
+    player.setBounce(0.2);
+    player.setCollideWorldBounds(true);
+
+    // Créer les animations du joueur
+    this.anims.create({
+        key: 'left',
+        frames: this.anims.generateFrameNumbers('dude', { start: 0, end: 3 }),
+        frameRate: 10,
+        repeat: -1
+    });
+
+    this.anims.create({
+        key: 'turn',
+        frames: [{ key: 'dude', frame: 4 }],
+        frameRate: 20
+    });
+
+    this.anims.create({
+        key: 'right',
+        frames: this.anims.generateFrameNumbers('dude', { start: 5, end: 8 }),
+        frameRate: 10,
+        repeat: -1
+    });
+
+    // Gérer les touches clavier
+    cursors = this.input.keyboard.createCursorKeys();
+
+    // Créer les étoiles à collecter
+    stars = this.physics.add.group({
+        key: 'star',
+        repeat: 27,
+        setXY: { x: 12, y: 0, stepX: 70 }
+    });
+
+    stars.children.iterate(function (child) {
+        child.setBounceY(Phaser.Math.FloatBetween(0.4, 0.8));
+    });
+
+    // Créer le groupe des bombes
+    bombs = this.physics.add.group();
+
+    // Afficher le score
+    scoreText = this.add.text(16, 16, 'Score: 0', {
+        fontSize: '45px',
+        fill: '#F700FF',
+        fontStyle: 'bold'
+    });
+
+    // Afficher les vies
+    livesText = this.add.text(16, 70, 'Vies: 3', {
+        fontSize: '40px',
+        fill: '#00FF00',
+        fontStyle: 'bold'
+    });
+
+    // Charger les meilleures statistiques
+    bestScore = parseInt(localStorage.getItem('bestScore')) || 0;
+    bestBombs = parseInt(localStorage.getItem('bestBombs')) || 0;
+    bestTime = parseInt(localStorage.getItem('bestTime')) || 0;
+
+    // Bouton pour afficher les statistiques
+    const statsButton = this.add.text(1700, 40, 'Stats', {
+        fontSize: '50px',
+        fill: '#0000FF',
+        fontStyle: 'bold'
+    });
+    statsButton.setInteractive();
+    statsButton.on('pointerdown', () => {
+        showStats.call(this);
+    });
+
+    // Configurer les collisions
+    this.physics.add.collider(player, platforms);
+    this.physics.add.collider(stars, platforms);
+    this.physics.add.collider(bombs, platforms);
+
+    // Déterminer les chevauchements
+    this.physics.add.overlap(player, stars, collectStar, null, this);
+    this.physics.add.collider(player, bombs, hitBomb, null, this);
+
+    // Afficher le temps
+    timeText = this.add.text(16, 120, 'Temps: 0', {
+        fontSize: '40px',
+        fill: '#FF8C00',
+        fontStyle: 'bold'
+    });
+
+    // Afficher le nombre de bombes
+    bombsText = this.add.text(16, 170, 'Bombes: 0', {
+        fontSize: '35px',
+        fill: '#FF0000',
+        fontStyle: 'bold'
+    });
+
+    // Démarrer le minuteur
+    timer = setInterval(timeIncrement, 1000);
+
+    // Afficher la version du jeu
+    this.add.text(16, 1030, 'Version 2.1', {
+        fontSize: '30px',
+        fill: '#FFFFFF',
+        fontStyle: 'bold'
+    });
+
+    // Afficher le créateur du jeu
+    this.add.text(250, 1030, 'Crée par Bryan', {
+        fontSize: '30px',
+        fill: '#FFFFFF',
+        fontStyle: 'bold'
+    });
+}
+
+/**
+ * Mets à jour l'état du jeu à chaque frame
+ */
+function update() {
+    if (gameOver) {
+        if (!gameOverTextAdded) {
+            // Afficher le game over
+            gameoverText = this.add.text(550, 30, 'Game Over', {
+                fontSize: '100px',
+                fill: '#FF0000',
+                fontStyle: 'bold'
+            });
+
+            restartButton = this.add.text(600, 200, 'Recommencer', {
+                fontSize: '100px',
+                fill: '#00FF00',
+                fontStyle: 'bold'
+            });
+
+            restartButton.setInteractive();
+            restartButton.on('pointerdown', () => {
+                gameOver = false;
+                gameOverTextAdded = false;
+                score = 0;
+                time = 0;
+                lives = 3;
+                scoreText.setText('Score: 0');
+                timeText.setText('Temps: 0');
+                livesText.setText('Vies: 3');
+                player.setPosition(960, 800);
+                player.setTint(0xffffff);
+                player.setVelocity(0, 0);
+
+                stars.children.iterate(function (child) {
+                    child.enableBody(true, child.x, 0, true, true);
+                });
+
+                bombs.clear(true, true);
+                updateBombsDisplay();
+                this.physics.resume();
+                clearInterval(timer);
+                timer = setInterval(timeIncrement, 1000);
+                gameoverText.destroy();
+                restartButton.destroy();
+            });
+
+            gameOverTextAdded = true;
+        }
+        return;
+    }
+
+    // Gérer les déplacements du joueur
+    if (cursors.left.isDown) {
+        player.setVelocityX(-360);
+        player.anims.play('left', true);
+    } else if (cursors.right.isDown) {
+        player.setVelocityX(360);
+        player.anims.play('right', true);
+    } else {
+        player.setVelocityX(0);
+        player.anims.play('turn');
+    }
+
+    // Gérer les sauts du joueur
+    if (cursors.up.isDown && player.body.touching.down) {
+        player.setVelocityY(-360);
+    }
+}
+
+// ============================================================================
+// FONCTIONS DE JEU
+// ============================================================================
+
+/**
+ * Appelée lorsque le joueur collecte une étoile
+ */
+function collectStar(player, star) {
+    star.disableBody(true, true);
+
+    // Augmenter le score
+    score += 10;
+    scoreText.setText('Score: ' + score);
+
+    // Si toutes les étoiles sont collectées
+    if (stars.countActive(true) === 0) {
+        // Réapparaître les étoiles
+        stars.children.iterate(function (child) {
+            child.enableBody(true, child.x, 0, true, true);
+        });
+
+        // Créer une nouvelle bombe
+        const x = (player.x < 400) ? Phaser.Math.Between(400, 800) : Phaser.Math.Between(0, 400);
+        const bomb = bombs.create(x, 16, 'bomb');
+
+        bomb.setBounce(1);
+        bomb.setCollideWorldBounds(true);
+        bomb.setVelocity(Phaser.Math.Between(-200, 200), 20);
+        bomb.allowGravity = false;
+
+        // Mettre à jour l'affichage des bombes
+        updateBombsDisplay();
+
+        // Mettre à jour le nombre maximum de bombes
+        const currentBombs = bombs.getChildren().length;
+        if (currentBombs > bestBombs) {
+            bestBombs = currentBombs;
+            localStorage.setItem('bestBombs', bestBombs);
+        }
+    }
+}
+
+/**
+ * Appelée lorsque le joueur touche une bombe
+ */
+function hitBomb(player, bomb) {
+    // Supprimer la bombe touchée
+    bomb.destroy();
+
+    // Mettre à jour l'affichage des bombes
+    updateBombsDisplay();
+
+    // Décrémenter les vies
+    lives--;
+
+    // Mettre à jour l'affichage des vies
+    livesText.setText('Vies: ' + lives);
+
+    // Effet visuel : joueur devient rouge brièvement
+    player.setTint(0xff0000);
+    this.time.delayedCall(500, () => {
+        player.setTint(0xffffff);
+    });
+
+    // Si plus de vies, game over
+    if (lives <= 0) {
+        this.physics.pause();
+        player.setTint(0xff0000);
+        player.anims.play('turn');
+        gameOver = true;
+        clearInterval(timer);
+
+        // Mettre à jour le meilleur score
+        if (score > bestScore) {
+            bestScore = score;
+            localStorage.setItem('bestScore', bestScore);
+        }
+
+        totalSessionTime += time;
+
+    } else {
+        // Repositionner le joueur et continuer
+        resetPlayerAfterHit.call(this);
+    }
+}
+
+/**
+ * Réinitialise le joueur après avoir perdu une vie
+ */
+function resetPlayerAfterHit() {
+    // Repositionner le joueur
+    player.setPosition(960, 800);
+    player.setVelocity(0, 0);
+
+    // Faire réapparaître les étoiles si elles ont toutes été collectées
+    if (stars.countActive(true) === 0) {
+        stars.children.iterate(function (child) {
+            child.enableBody(true, child.x, 0, true, true);
+        });
+    }
+}
+
+/**
+ * Incrémente le temps de jeu
+ */
+function timeIncrement() {
+    time++;
+    timeText.setText('Temps: ' + time);
+}
+
+/**
+ * Met à jour l'affichage du nombre de bombes
+ */
+function updateBombsDisplay() {
+    const bombCount = bombs.getChildren().length;
+    bombsText.setText('Bombes: ' + bombCount);
+}
+
+/**
+ * Affiche les statistiques du joueur
+ */
+function showStats() {
+    if (statsOpen) {
+        return;
+    }
+
+    statsOpen = true;
+
+    if (!gameOver) {
+        this.physics.pause();
+        if (timer) {
+            clearInterval(timer);
+            statsPaused = true;
+        }
+    }
+
+    const graphics = this.add.graphics();
+    graphics.fillStyle(0x333333, 0.9);
+    graphics.fillRect(560, 240, 800, 600);
+
+    const title = this.add.text(960, 300, 'Meilleures Statistiques', {
+        fontSize: '50px',
+        fill: '#FFFFFF',
+        fontStyle: 'bold'
+    }).setOrigin(0.5);
+
+    const bestScoreText = this.add.text(960, 400, 'Meilleur Score: ' + bestScore, {
+        fontSize: '30px',
+        fill: '#FFFFFF'
+    }).setOrigin(0.5);
+
+    const bombText = this.add.text(960, 450, 'Max Bombs: ' + bestBombs, {
+        fontSize: '30px',
+        fill: '#FFFFFF'
+    }).setOrigin(0.5);
+
+    const bestTimeText = this.add.text(960, 500, 'Meilleur Temps: ' + bestTime + 's', {
+        fontSize: '30px',
+        fill: '#FFFFFF'
+    }).setOrigin(0.5);
+
+    const sessionText = this.add.text(960, 550, 'Temps Total de Session: ' + totalSessionTime + 's', {
+        fontSize: '30px',
+        fill: '#FFFFFF'
+    }).setOrigin(0.5);
+
+    const closeButton = this.add.text(960, 620, 'Fermer', {
+        fontSize: '30px',
+        fill: '#FF0000',
+        fontStyle: 'bold'
+    }).setOrigin(0.5);
+
+    closeButton.setInteractive();
+    closeButton.on('pointerdown', () => {
+        graphics.destroy();
+        title.destroy();
+        bestScoreText.destroy();
+        bombText.destroy();
+        bestTimeText.destroy();
+        sessionText.destroy();
+        closeButton.destroy();
+        statsOpen = false;
+
+        if (!gameOver) {
+            this.physics.resume();
+            if (statsPaused) {
+                timer = setInterval(timeIncrement, 1000);
+                statsPaused = false;
+            }
+        }
+    });
+}
+
+</script>
+
+</body>
+</html>
