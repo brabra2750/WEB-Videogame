@@ -1,5 +1,7 @@
 # WEB-Videogame
 
+## Va voir dans les branches les dernières version !
+
 -**Wiki :** https://github.com/brabra2750/WEB-Videogame/wiki
 
 -**Release :** https://github.com/brabra2750/WEB-Videogame/releases
