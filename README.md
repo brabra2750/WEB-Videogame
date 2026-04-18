@@ -1,7 +1,7 @@
 # WEB-Videogame
 
--**Wiki :**
+-**Wiki :** https://github.com/brabra2750/WEB-Videogame/wiki
 
--**Release :**
+-**Release :** https://github.com/brabra2750/WEB-Videogame/releases
 
--**Issues :**
+-**Issues :** https://github.com/brabra2750/WEB-Videogame/issues
